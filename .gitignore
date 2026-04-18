@@ -1,0 +1,37 @@
+# Node modules
+node_modules/
+renderer/node_modules/
+
+# Build output
+dist/
+build/
+out/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+
+# Electron
+*.asar
+
+# FFmpeg binaries (optional if large)
+node_modules/ffmpeg-static/bin/
+
+# Vite
+renderer/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary
+tmp/
+temp/

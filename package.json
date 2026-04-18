@@ -1,0 +1,61 @@
+{
+  "name": "media-recorder-app",
+  "version": "1.0.0",
+  "main": "src/main/index.js",
+
+  "scripts": {
+    "dev": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
+    "dev:renderer": "cd renderer && npm run dev",
+    "dev:electron": "electron .",
+
+    "build:renderer": "cd renderer && npm run build",
+    "build": "npm run build:renderer",
+
+    "dist": "npm run build && electron-builder"
+  },
+
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^30.5.1",
+    "electron-builder": "^24.13.3",
+    "wait-on": "^7.2.0"
+  },
+
+  "dependencies": {
+    "check-disk-space": "^3.4.0",
+    "ffmpeg-static": "^5.3.0"
+  },
+
+  "build": {
+    "appId": "com.internal.media-recorder",
+    "productName": "Media Recorder",
+
+    "directories": {
+      "output": "dist"
+    },
+
+    "files": [
+      "src/main/**/*",
+      "renderer/dist/**/*",
+      "node_modules/ffmpeg-static/**/*",
+      "package.json"
+    ],
+
+    "asarUnpack": [
+      "**/node_modules/ffmpeg-static/**"
+    ],
+
+    "win": {
+      "target": "nsis"
+    },
+
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.utilities"
+    },
+
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}
