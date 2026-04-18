@@ -29,6 +29,7 @@
   "build": {
     "appId": "com.internal.video-recorder-studio",
     "productName": "video-recorder-studio",
+    "publish": "null",
 
     "directories": {
       "output": "dist"
