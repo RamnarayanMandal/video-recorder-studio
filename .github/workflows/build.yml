@@ -24,7 +24,9 @@ jobs:
           node-version: 18
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install
+          cd renderer && npm install
 
       - name: Build app (Electron)
         run: npm run dist
