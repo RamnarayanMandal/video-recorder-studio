@@ -1,5 +1,5 @@
 {
-  "name": "media-recorder-app",
+  "name": "video-recorder-studio",
   "version": "1.0.0",
   "main": "src/main/index.js",
 
@@ -27,8 +27,8 @@
   },
 
   "build": {
-    "appId": "com.internal.media-recorder",
-    "productName": "Media Recorder",
+    "appId": "com.internal.video-recorder-studio",
+    "productName": "video-recorder-studio",
 
     "directories": {
       "output": "dist"
