@@ -43,6 +43,20 @@ function getConversionQueue() {
 }
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
+app.commandLine.appendSwitch('disable-background-timer-throttling')
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+
+let mainWindow = null
+let overlayWindow = null
+let overlayConfig = {
+  active: false,
+  screenSourceId: '',
+  cameraId: '',
+  webcam: true,
+  webcamShape: 'rectangle',
+  webcamSize: 'medium',
+}
 
 async function requestMacPermissions() {
   if (process.platform !== 'darwin') return
@@ -63,6 +77,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   })
 
@@ -76,6 +91,66 @@ function createWindow() {
   isDev
     ? win.loadURL('http://localhost:5173')
     : win.loadFile(path.join(__dirname, '../../renderer/dist/index.html'))
+  mainWindow = win
+  return win
+}
+
+function sendOverlayConfig() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return
+  overlayWindow.webContents.send('overlay-config', overlayConfig)
+}
+
+function createOverlayWindow() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.show()
+    overlayWindow.focus()
+    sendOverlayConfig()
+    return overlayWindow
+  }
+  overlayWindow = new BrowserWindow({
+    width: 420,
+    height: 260,
+    minWidth: 280,
+    minHeight: 180,
+    maxWidth: 1400,
+    maxHeight: 900,
+    frame: false,
+    transparent: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    resizable: true,
+    movable: true,
+    skipTaskbar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+      additionalArguments: ['--window-role=overlay'],
+    },
+  })
+  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver')
+  // Prevent overlay from appearing inside captured screen frames (black blocking rectangle).
+  overlayWindow.setContentProtection(true)
+
+  if (isDev) {
+    overlayWindow.loadURL('http://localhost:5173/overlay')
+  } else {
+    const overlayHtml = path.join(__dirname, '../../renderer/dist/overlay.html')
+    const indexHtml = path.join(__dirname, '../../renderer/dist/index.html')
+    if (fs.existsSync(overlayHtml)) overlayWindow.loadFile(overlayHtml)
+    else overlayWindow.loadFile(indexHtml, { hash: 'overlay' })
+  }
+
+  overlayWindow.once('ready-to-show', () => {
+    overlayWindow?.showInactive()
+    sendOverlayConfig()
+  })
+  overlayWindow.on('closed', () => {
+    overlayWindow = null
+  })
+  return overlayWindow
 }
 
 ipcMain.handle('get-primary-screen', async () => {
@@ -95,6 +170,95 @@ ipcMain.handle('get-display-sources', async () => {
     thumbnail: s.thumbnail.toDataURL(),
     display_id: s.display_id,
   }))
+})
+
+ipcMain.handle('overlay-open', async () => {
+  createOverlayWindow()
+  const selectedSourceId = String(overlayConfig.screenSourceId || '')
+  const isWholeScreenCapture = selectedSourceId.startsWith('screen:')
+  if (isWholeScreenCapture && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
+    mainWindow.minimize()
+  }
+  return { ok: true }
+})
+
+ipcMain.handle('overlay-close', async () => {
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.close()
+  overlayWindow = null
+  return { ok: true }
+})
+
+ipcMain.handle('overlay-config-set', async (event, partial) => {
+  overlayConfig = { ...overlayConfig, ...(partial || {}) }
+  if (!overlayConfig.active) {
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.close()
+    overlayWindow = null
+    return { ok: true, closed: true }
+  }
+  if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow()
+  sendOverlayConfig()
+  return { ok: true }
+})
+
+ipcMain.handle('overlay-move-by', async (event, { dx = 0, dy = 0 }) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return { ok: false }
+  const b = win.getBounds()
+  win.setBounds({ x: Math.round(b.x + dx), y: Math.round(b.y + dy), width: b.width, height: b.height })
+  return { ok: true }
+})
+
+ipcMain.handle('overlay-resize-by', async (event, { dw = 0, dh = 0 }) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return { ok: false }
+  const b = win.getBounds()
+  const width = Math.max(280, Math.round(b.width + dw))
+  const height = Math.max(180, Math.round(b.height + dh))
+  win.setBounds({ ...b, width, height })
+  return { ok: true }
+})
+
+ipcMain.handle('overlay-center', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return { ok: false }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const mb = mainWindow.getBounds()
+    const wb = win.getBounds()
+    win.setBounds({
+      ...wb,
+      x: Math.round(mb.x + (mb.width - wb.width) / 2),
+      y: Math.round(mb.y + 80),
+    })
+  } else {
+    win.center()
+  }
+  return { ok: true }
+})
+
+ipcMain.handle('overlay-stop-recording', async () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('overlay-action', { type: 'stop-recording' })
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  }
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.close()
+  overlayWindow = null
+  return { ok: true }
+})
+
+ipcMain.handle('overlay-toggle-mic', async () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('overlay-action', { type: 'toggle-mic' })
+  }
+  return { ok: true }
+})
+
+ipcMain.handle('overlay-toggle-pause', async () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('overlay-action', { type: 'toggle-pause' })
+  }
+  return { ok: true }
 })
 
 ipcMain.handle('pick-save-folder', async () => {

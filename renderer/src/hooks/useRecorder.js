@@ -100,6 +100,7 @@ export function useRecorder({
   const [estimatedBytes10Min, setEstimatedBytes10Min] = useState(0)
   /** Background MP4 job id after fast WebM save */
   const [lastMp4JobId, setLastMp4JobId] = useState(null)
+  const [isStarting, setIsStarting] = useState(false)
 
   const previewBlockedRef = useRef(false)
   const previewActiveRef = useRef(false)
@@ -126,9 +127,9 @@ export function useRecorder({
   const analyserRef = useRef(null)
   const screenVideoRef = useRef(null)
   const camVideoRef = useRef(null)
-  const visibilityHandlerRef = useRef(null)
   const baseNameRef = useRef('')
-
+  const startInFlightRef = useRef(false)
+  const stopInFlightRef = useRef(false)
   const mountCanvas = useCallback(
     (canvas) => {
       const mount = canvasMountRef?.current
@@ -173,10 +174,6 @@ export function useRecorder({
     recorderRef.current = null
     sessionIdRef.current = null
     tmpPathRef.current = null
-    if (visibilityHandlerRef.current) {
-      document.removeEventListener('visibilitychange', visibilityHandlerRef.current)
-      visibilityHandlerRef.current = null
-    }
   }, [unmountCanvas])
 
   /**
@@ -247,6 +244,15 @@ export function useRecorder({
     if (!settings.screenSourceId) {
       throw new Error('Select a screen or window in System input settings.')
     }
+    try {
+      const sources = await window.electronAPI.getDisplaySources()
+      const selected = sources.some((s) => s.id === settings.screenSourceId)
+      if (!selected) {
+        throw new Error('Selected screen/window is no longer available. Refresh and select again.')
+      }
+    } catch (e) {
+      if (e?.message) throw e
+    }
     if (!screenVideoRef.current) {
       throw new Error('Preview is not ready. Close and reopen the recorder.')
     }
@@ -262,6 +268,13 @@ export function useRecorder({
 
     let cam = null
     if (settings.webcam) {
+      if (settings.cameraId) {
+        const cams = await navigator.mediaDevices.enumerateDevices()
+        const exists = cams.some((d) => d.kind === 'videoinput' && d.deviceId === settings.cameraId)
+        if (!exists) {
+          throw new Error('Selected camera is not available. Choose another camera.')
+        }
+      }
       try {
         cam = await navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -285,6 +298,13 @@ export function useRecorder({
 
     let mic = null
     if (settings.mic) {
+      if (settings.micId) {
+        const mics = await navigator.mediaDevices.enumerateDevices()
+        const exists = mics.some((d) => d.kind === 'audioinput' && d.deviceId === settings.micId)
+        if (!exists) {
+          throw new Error('Selected microphone is not available. Choose another microphone.')
+        }
+      }
       try {
         mic = await navigator.mediaDevices.getUserMedia({
           audio: {
@@ -326,6 +346,7 @@ export function useRecorder({
     composer.setWebcamEnabled(settings.webcam)
     composer.setPipShape(settings.webcamShape || 'rectangle')
     composer.setPipPreset(settings.pipPosition)
+    composer.setPipSize(settings.webcamSize || 'medium')
     composerRef.current = composer
     composer.start()
     mountCanvas(composer.getCanvas())
@@ -409,6 +430,9 @@ export function useRecorder({
   )
 
   const startRecording = useCallback(async () => {
+    if (state !== STATES.IDLE || startInFlightRef.current || stopInFlightRef.current) return
+    startInFlightRef.current = true
+    setIsStarting(true)
     previewBlockedRef.current = true
     setError(null)
     rawBytesRef.current = 0
@@ -424,12 +448,16 @@ export function useRecorder({
     if (!saveFolder) {
       previewBlockedRef.current = false
       setError('Choose a save folder from the title bar before recording.')
+      startInFlightRef.current = false
+      setIsStarting(false)
       return
     }
 
     if (!window.electronAPI?.recordingSessionStart) {
       previewBlockedRef.current = false
       setError('Recorder API is unavailable. Restart the app.')
+      startInFlightRef.current = false
+      setIsStarting(false)
       return
     }
 
@@ -439,11 +467,15 @@ export function useRecorder({
     } catch (e) {
       previewBlockedRef.current = false
       setError(e?.message || 'Could not verify save folder.')
+      startInFlightRef.current = false
+      setIsStarting(false)
       return
     }
     if (!ok) {
       previewBlockedRef.current = false
       setError('Save folder is missing or invalid. Pick another folder.')
+      startInFlightRef.current = false
+      setIsStarting(false)
       return
     }
 
@@ -456,6 +488,8 @@ export function useRecorder({
     if (!disk.ok) {
       previewBlockedRef.current = false
       setError(disk.message || 'Not enough free disk space to record.')
+      startInFlightRef.current = false
+      setIsStarting(false)
       return
     }
 
@@ -467,6 +501,7 @@ export function useRecorder({
       } else {
         await acquireStreams()
       }
+      console.info('[Recorder] Streams initialized')
 
       const sess = await window.electronAPI.recordingSessionStart()
       if (!sess?.sessionId) {
@@ -520,6 +555,7 @@ export function useRecorder({
       }
 
       recorder.start(400)
+      console.info('[Recorder] Stream started, MediaRecorder running')
 
       baseNameRef.current = `recording-${Date.now()}`
       setState(STATES.RECORDING)
@@ -527,17 +563,6 @@ export function useRecorder({
       clearInterval(timerRef.current)
       timerRef.current = setInterval(() => setDuration((d) => d + 1), 1000)
 
-      const onVis = () => {
-        if (document.hidden && recorderRef.current && recorderRef.current.state === 'recording') {
-          try {
-            recorderRef.current.pause()
-            clearInterval(timerRef.current)
-            setState(STATES.PAUSED)
-          } catch { /* ignore */ }
-        }
-      }
-      visibilityHandlerRef.current = onVis
-      document.addEventListener('visibilitychange', onVis)
     } catch (err) {
       if (sessionIdRef.current) {
         try {
@@ -555,8 +580,11 @@ export function useRecorder({
       previewBlockedRef.current = false
       cleanup()
       setState(STATES.IDLE)
+    } finally {
+      startInFlightRef.current = false
+      setIsStarting(false)
     }
-  }, [saveFolder, acquireStreams, buildRecordedStream, cleanup, settings])
+  }, [state, saveFolder, acquireStreams, buildRecordedStream, cleanup, settings])
 
   const togglePause = useCallback(() => {
     const rec = recorderRef.current
@@ -573,8 +601,10 @@ export function useRecorder({
   }, [state])
 
   const stopRecording = useCallback(() => {
+    if (stopInFlightRef.current) return
     const rec = recorderRef.current
     if (!rec) return
+    stopInFlightRef.current = true
     clearInterval(timerRef.current)
     cancelAnimationFrame(micAnimRef.current)
     setSaveProgress({ percent: 0, label: 'Stopping recorder…' })
@@ -593,6 +623,7 @@ export function useRecorder({
             previewBlockedRef.current = false
             cleanupStreams()
             setState(STATES.IDLE)
+            stopInFlightRef.current = false
             return
           }
           pendingExportTmpRef.current = endRes.tmpPath
@@ -620,6 +651,10 @@ export function useRecorder({
           previewBlockedRef.current = false
           cleanupStreams()
           setState(STATES.IDLE)
+          stopInFlightRef.current = false
+        })
+        .finally(() => {
+          stopInFlightRef.current = false
         })
     }
 
@@ -637,6 +672,7 @@ export function useRecorder({
       previewBlockedRef.current = false
       cleanup()
       setState(STATES.IDLE)
+      stopInFlightRef.current = false
     }
   }, [cleanup, cleanupStreams, runAutoFinalize, defaultExport, stopCaptureSourcesOnly])
 
@@ -676,6 +712,8 @@ export function useRecorder({
     setLastMp4JobId(null)
     chunkAccumulatedRef.current = 0
     chunkBytesAtLastTickRef.current = 0
+    startInFlightRef.current = false
+    stopInFlightRef.current = false
   }, [cleanup])
 
   const stopPreviewOnly = useCallback(() => {
@@ -710,6 +748,7 @@ export function useRecorder({
     settings.frameRate,
     settings.webcam,
     settings.webcamShape,
+    settings.webcamSize,
     settings.mic,
     settings.cameraId,
     settings.micId,
@@ -728,7 +767,7 @@ export function useRecorder({
   }, [state, previewKey, startPreview])
 
   useEffect(() => {
-    const unsub = window.electronAPI.onFinalizeSaveProgress?.((d) => {
+    const unsub = window.electronAPI?.onFinalizeSaveProgress?.((d) => {
       setSaveProgress({ percent: d.percent, label: d.label || '' })
     })
     return () => unsub?.()
@@ -737,6 +776,10 @@ export function useRecorder({
   useEffect(() => {
     composerRef.current?.setPipShape?.(settings.webcamShape || 'rectangle')
   }, [settings.webcamShape])
+
+  useEffect(() => {
+    composerRef.current?.setPipSize?.(settings.webcamSize || 'medium')
+  }, [settings.webcamSize])
 
   useEffect(() => {
     durationRef.current = duration
@@ -812,6 +855,13 @@ export function useRecorder({
     comp.setPipOverride(null)
   }, [])
 
+  const setMicMuted = useCallback((muted) => {
+    const tracks = micStreamRef.current?.getAudioTracks?.() || []
+    tracks.forEach((t) => {
+      t.enabled = !muted
+    })
+  }, [])
+
   useEffect(() => () => cleanup(), [cleanup])
 
   return {
@@ -833,6 +883,7 @@ export function useRecorder({
     lastMp4JobId,
     screenStreamRef,
     camStreamRef,
+    micStreamRef,
     screenVideoRef,
     camVideoRef,
     startRecording,
@@ -844,5 +895,7 @@ export function useRecorder({
     updatePipDrag,
     getPipRect,
     applyPipPreset,
+    setMicMuted,
+    isStarting,
   }
 }

@@ -76,7 +76,7 @@ export default function App() {
           <rect x="2" y="5" width="15" height="14" rx="2.5" stroke="var(--purple)" strokeWidth="1.8"/>
           <path d="M17 9l5-3v12l-5-3V9z" stroke="var(--purple)" strokeWidth="1.8" strokeLinejoin="round"/>
         </svg>
-        <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: .2 }}>Media Recorder</span>
+        <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: .2 }}>Video Recorder Studio</span>
 
         <div style={{ flex: 1 }} />
 

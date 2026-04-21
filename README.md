@@ -79,9 +79,9 @@ npm run dist
 
 ```
 dist/
- ├── Media Recorder Setup.exe
- ├── Media Recorder.dmg
- ├── Media Recorder.AppImage
+ ├── Setup.exe
+ ├── Video Recorder Studio.dmg
+ ├── Video Recorder Studio.AppImage
 ```
 
 ---

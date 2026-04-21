@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron')
+const isOverlayWindow = process.argv.some((arg) => arg === '--window-role=overlay')
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  windowRole: isOverlayWindow ? 'overlay' : 'main',
   platform: process.platform,
   getPrimaryScreen: () => ipcRenderer.invoke('get-primary-screen'),
   getDisplaySources: () => ipcRenderer.invoke('get-display-sources'),
@@ -44,5 +46,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event, data) => callback(data)
     ipcRenderer.on('conversion-job-update', handler)
     return () => ipcRenderer.removeListener('conversion-job-update', handler)
+  },
+
+  overlayOpen: () => ipcRenderer.invoke('overlay-open'),
+  overlayClose: () => ipcRenderer.invoke('overlay-close'),
+  overlayConfigSet: (config) => ipcRenderer.invoke('overlay-config-set', config),
+  overlayMoveBy: (payload) => ipcRenderer.invoke('overlay-move-by', payload),
+  overlayResizeBy: (payload) => ipcRenderer.invoke('overlay-resize-by', payload),
+  overlayCenter: () => ipcRenderer.invoke('overlay-center'),
+  overlayStopRecording: () => ipcRenderer.invoke('overlay-stop-recording'),
+  overlayToggleMic: () => ipcRenderer.invoke('overlay-toggle-mic'),
+  overlayTogglePause: () => ipcRenderer.invoke('overlay-toggle-pause'),
+  onOverlayConfig: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('overlay-config', handler)
+    return () => ipcRenderer.removeListener('overlay-config', handler)
+  },
+  onOverlayAction: (callback) => {
+    const handler = (_event, data) => callback(data)
+    ipcRenderer.on('overlay-action', handler)
+    return () => ipcRenderer.removeListener('overlay-action', handler)
   },
 })

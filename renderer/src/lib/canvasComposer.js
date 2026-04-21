@@ -53,6 +53,12 @@ export function pipRectFromPreset(preset, cw, ch, marginRatio = 0.02) {
   return { x, y, w: pipW, h: pipH }
 }
 
+function pipScaleMultiplier(size) {
+  if (size === 'small') return 0.8
+  if (size === 'large') return 1.25
+  return 1
+}
+
 /**
  * Draws screen + webcam PiP to a canvas and exposes captureStream().
  */
@@ -76,6 +82,7 @@ export class CanvasComposer {
     this.pipPreset = 'bottom-right'
     /** Optional drag override: pixel rect {x,y,w,h} in canvas space */
     this.pipOverride = null
+    this.pipSize = 'medium'
     this._running = false
     this._raf = 0
     this._capture = null
@@ -103,6 +110,10 @@ export class CanvasComposer {
     this.pipOverride = rect
   }
 
+  setPipSize(size) {
+    this.pipSize = ['small', 'medium', 'large'].includes(size) ? size : 'medium'
+  }
+
   start() {
     if (!this.ctx) return
     this._running = true
@@ -124,7 +135,17 @@ export class CanvasComposer {
   }
 
   getPipRect() {
-    return this.pipOverride ?? pipRectFromPreset(this.pipPreset, this.width, this.height)
+    const base = this.pipOverride ?? pipRectFromPreset(this.pipPreset, this.width, this.height)
+    if (!base) return base
+    const scale = pipScaleMultiplier(this.pipSize)
+    if (scale === 1) return base
+    const w = Math.round(base.w * scale)
+    const h = Math.round(base.h * scale)
+    const cx = base.x + base.w / 2
+    const cy = base.y + base.h / 2
+    const x = Math.max(8, Math.min(this.width - w - 8, Math.round(cx - w / 2)))
+    const y = Math.max(8, Math.min(this.height - h - 8, Math.round(cy - h / 2)))
+    return { x, y, w, h }
   }
 
   getVideoStream() {
@@ -155,7 +176,7 @@ export class CanvasComposer {
     const cv = this.camVideo
     if (!cv || cv.readyState < 2) return
 
-    const pip = this.pipOverride ?? pipRectFromPreset(this.pipPreset, cw, ch)
+    const pip = this.getPipRect()
     const { x, y, w, h } = pip
 
     ctx.save()

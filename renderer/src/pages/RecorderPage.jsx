@@ -68,6 +68,9 @@ function loadInitialSettings() {
     webcamShape: ['rectangle', 'circle'].includes(loadString(STORAGE_KEYS.webcamShape))
       ? loadString(STORAGE_KEYS.webcamShape)
       : DEFAULT_SETTINGS.webcamShape,
+    webcamSize: ['small', 'medium', 'large'].includes(loadString(STORAGE_KEYS.webcamSize))
+      ? loadString(STORAGE_KEYS.webcamSize)
+      : DEFAULT_SETTINGS.webcamSize,
     micId: loadString(STORAGE_KEYS.micId),
     cameraId: loadString(STORAGE_KEYS.cameraId),
     screenSourceId: loadString(STORAGE_KEYS.screenSourceId),
@@ -89,6 +92,9 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
   const [audioInputs, setAudioInputs] = useState([])
   const [videoInputs, setVideoInputs] = useState([])
   const [pipDragging, setPipDragging] = useState(false)
+  const [toolbarOffset, setToolbarOffset] = useState({ x: 0, y: 0 })
+  const [toolbarDragging, setToolbarDragging] = useState(false)
+  const toolbarDragRef = useRef(null)
 
   const canvasMountRef = useRef(null)
   const previewWrapRef = useRef(null)
@@ -129,6 +135,7 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
     updatePipDrag,
     getPipRect,
     applyPipPreset,
+    setMicMuted,
   } = recorder
 
   const mp4Job = useConversionJobsStore((s) => {
@@ -142,6 +149,10 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
     state === STATES.RECORDING ||
     state === STATES.PAUSED ||
     state === STATES.SAVING
+  const lockDeviceInputs =
+    state === STATES.COUNTDOWN ||
+    state === STATES.RECORDING ||
+    state === STATES.PAUSED
 
   const isExportChoice = state === STATES.EXPORT_CHOICE
 
@@ -155,6 +166,7 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
       if (partial.systemAudio !== undefined) saveBool(STORAGE_KEYS.systemAudio, next.systemAudio)
       if (partial.pipPosition !== undefined) saveString(STORAGE_KEYS.pipPosition, next.pipPosition)
       if (partial.webcamShape !== undefined) saveString(STORAGE_KEYS.webcamShape, next.webcamShape)
+      if (partial.webcamSize !== undefined) saveString(STORAGE_KEYS.webcamSize, next.webcamSize)
       if (partial.micId !== undefined) saveString(STORAGE_KEYS.micId, next.micId)
       if (partial.cameraId !== undefined) saveString(STORAGE_KEYS.cameraId, next.cameraId)
       if (partial.screenSourceId !== undefined) saveString(STORAGE_KEYS.screenSourceId, next.screenSourceId)
@@ -192,7 +204,7 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
   }, [])
 
   useEffect(() => {
-    window.electronAPI.mp4EncoderCapabilities?.().then(setEncoderCaps).catch(() => {
+    window.electronAPI?.mp4EncoderCapabilities?.().then(setEncoderCaps).catch(() => {
       setEncoderCaps({ nvenc: false, qsv: false })
     })
   }, [])
@@ -209,6 +221,66 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
     navigator.mediaDevices.addEventListener('devicechange', onDev)
     return () => navigator.mediaDevices.removeEventListener('devicechange', onDev)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!displaySources.length) return
+    if (displaySources.some((s) => s.id === settings.screenSourceId)) return
+    const first = displaySources.find((s) => s.name?.toLowerCase().includes('screen')) || displaySources[0]
+    if (first?.id) patchSettings({ screenSourceId: first.id })
+  }, [displaySources, settings.screenSourceId, patchSettings])
+
+  useEffect(() => {
+    const active =
+      state === STATES.COUNTDOWN ||
+      state === STATES.RECORDING ||
+      state === STATES.PAUSED
+    if (active) window.electronAPI?.overlayOpen?.().catch(() => {})
+    else window.electronAPI?.overlayClose?.().catch(() => {})
+    window.electronAPI
+      ?.overlayConfigSet?.({
+        active,
+        durationSec: duration,
+        micLevel,
+        isPaused: state === STATES.PAUSED,
+        micEnabled: !!settings.mic,
+        screenSourceId: settings.screenSourceId,
+        cameraId: settings.cameraId || '',
+        webcam: !!settings.webcam,
+        webcamShape: settings.webcamShape || 'rectangle',
+        webcamSize: settings.webcamSize || 'medium',
+      })
+      .catch(() => {})
+  }, [
+    state,
+    duration,
+    micLevel,
+    settings.mic,
+    settings.screenSourceId,
+    settings.cameraId,
+    settings.webcam,
+    settings.webcamShape,
+    settings.webcamSize,
+  ])
+
+  useEffect(() => {
+    const unsub = window.electronAPI?.onOverlayAction?.((event) => {
+      if (!event?.type) return
+      if (event.type === 'stop-recording') {
+        if (state === STATES.RECORDING || state === STATES.PAUSED) stopRecording()
+        return
+      }
+      if (event.type === 'toggle-pause') {
+        if (state === STATES.RECORDING || state === STATES.PAUSED) togglePause()
+        return
+      }
+      if (event.type === 'toggle-mic') {
+        const nextMic = !settings.mic
+        patchSettings({ mic: nextMic })
+        setMicMuted(!nextMic)
+      }
+    })
+    return () => unsub?.()
+  }, [state, settings.mic, patchSettings, setMicMuted, stopRecording, togglePause])
 
   const pipHitTest = useCallback(
     (clientX, clientY) => {
@@ -275,6 +347,28 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
       window.removeEventListener('pointerup', onUp)
     }
   }, [pipDragging, updatePipDrag])
+
+  useEffect(() => {
+    if (!toolbarDragging) return
+    const onMove = (e) => {
+      if (!toolbarDragRef.current) return
+      const { startX, startY, startOffsetX, startOffsetY } = toolbarDragRef.current
+      setToolbarOffset({
+        x: startOffsetX + (e.clientX - startX),
+        y: startOffsetY + (e.clientY - startY),
+      })
+    }
+    const onUp = () => {
+      setToolbarDragging(false)
+      toolbarDragRef.current = null
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp, { once: true })
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [toolbarDragging])
 
   const isLive = state === STATES.RECORDING || state === STATES.PAUSED
   const isCountdown = state === STATES.COUNTDOWN
@@ -376,7 +470,7 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
             </div>
             <label style={{ fontSize: 11, color: 'var(--text3)' }}>Screen / window</label>
             <select
-              disabled={busy}
+              disabled={lockDeviceInputs}
               value={settings.screenSourceId}
               onChange={(e) => patchSettings({ screenSourceId: e.target.value })}
               style={selectStyle}
@@ -390,7 +484,7 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
             </select>
             <button
               type="button"
-              disabled={busy}
+              disabled={lockDeviceInputs}
               onClick={() => refreshDisplaySources()}
               style={smallBtn}
             >
@@ -399,7 +493,7 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
 
             <label style={{ fontSize: 11, color: 'var(--text3)' }}>Microphone</label>
             <select
-              disabled={busy}
+              disabled={lockDeviceInputs}
               value={settings.micId || ''}
               onChange={(e) => patchSettings({ micId: e.target.value })}
               style={selectStyle}
@@ -414,7 +508,7 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
 
             <label style={{ fontSize: 11, color: 'var(--text3)' }}>Camera</label>
             <select
-              disabled={busy}
+              disabled={lockDeviceInputs}
               value={settings.cameraId || ''}
               onChange={(e) => patchSettings({ cameraId: e.target.value })}
               style={selectStyle}
@@ -540,6 +634,17 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
               >
                 <option value="rectangle">Rectangle (default)</option>
                 <option value="circle">Round — full circle</option>
+              </select>
+              <label style={{ fontSize: 11, color: 'var(--text3)' }}>Webcam size</label>
+              <select
+                disabled={busy || !settings.webcam}
+                value={settings.webcamSize || 'medium'}
+                onChange={(e) => patchSettings({ webcamSize: e.target.value })}
+                style={selectStyle}
+              >
+                <option value="small">Small</option>
+                <option value="medium">Medium</option>
+                <option value="large">Large</option>
               </select>
               <ToggleRow
                 disabled={busy}
@@ -879,7 +984,7 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
                     </span>
                     <button
                       type="button"
-                      onClick={() => window.electronAPI.cancelMp4Conversion(mp4Job.id)}
+                      onClick={() => window.electronAPI?.cancelMp4Conversion?.(mp4Job.id)}
                       style={{ ...secondaryBtn, padding: '6px 12px', fontSize: 12 }}
                     >
                       Cancel
@@ -905,7 +1010,7 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
                   <p style={{ margin: '0 0 8px' }}>{mp4Job.error || 'MP4 conversion failed. WebM is safe on disk.'}</p>
                   <button
                     type="button"
-                    onClick={() => window.electronAPI.retryMp4Conversion(mp4Job.id)}
+                    onClick={() => window.electronAPI?.retryMp4Conversion?.(mp4Job.id)}
                     style={{ ...primaryBtn, padding: '8px 16px', fontSize: 13 }}
                   >
                     Retry MP4
@@ -918,7 +1023,7 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
                   MP4 ready —{' '}
                   <button
                     type="button"
-                    onClick={() => window.electronAPI.openFile(mp4Job.mp4Path)}
+                    onClick={() => window.electronAPI?.openFile?.(mp4Job.mp4Path)}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -937,14 +1042,14 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center', marginTop: 8 }}>
                 <button
                   type="button"
-                  onClick={() => lastFile && window.electronAPI.openFile(lastFile)}
+                  onClick={() => lastFile && window.electronAPI?.openFile?.(lastFile)}
                   style={primaryBtn}
                 >
                   Open WebM
                 </button>
                 <button
                   type="button"
-                  onClick={() => lastFile && window.electronAPI.showItemInFolder(lastFile)}
+                  onClick={() => lastFile && window.electronAPI?.showItemInFolder?.(lastFile)}
                   style={secondaryBtn}
                 >
                   Open folder
@@ -1012,7 +1117,7 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
             position: 'absolute',
             left: '50%',
             bottom: 20,
-            transform: 'translateX(-50%)',
+            transform: `translate(calc(-50% + ${toolbarOffset.x}px), ${toolbarOffset.y}px)`,
             display: 'flex',
             alignItems: 'center',
             flexWrap: 'wrap',
@@ -1028,6 +1133,31 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
             zIndex: 5,
           }}
         >
+          <button
+            type="button"
+            title="Drag toolbar"
+            onPointerDown={(e) => {
+              e.preventDefault()
+              toolbarDragRef.current = {
+                startX: e.clientX,
+                startY: e.clientY,
+                startOffsetX: toolbarOffset.x,
+                startOffsetY: toolbarOffset.y,
+              }
+              setToolbarDragging(true)
+            }}
+            style={{ ...iconBtn, cursor: toolbarDragging ? 'grabbing' : 'grab' }}
+          >
+            ⠿
+          </button>
+          <button
+            type="button"
+            title="Reset toolbar position"
+            onClick={() => setToolbarOffset({ x: 0, y: 0 })}
+            style={iconBtn}
+          >
+            ⌖
+          </button>
           <button
             type="button"
             onClick={() => {

@@ -14,6 +14,8 @@ export const STORAGE_KEYS = {
   pipPosition: `${PREFIX}pip-position`,
   /** Webcam overlay: rectangle | circle */
   webcamShape: `${PREFIX}webcam-shape`,
+  /** Webcam overlay size: small | medium | large */
+  webcamSize: `${PREFIX}webcam-size`,
   qualityMode: `${PREFIX}quality-mode`,
   defaultExport: `${PREFIX}default-export`,
   autoCleanupDays: `${PREFIX}auto-cleanup-days`,
@@ -29,6 +31,7 @@ export const DEFAULT_SETTINGS = {
   systemAudio: true,
   pipPosition: 'bottom-right',
   webcamShape: 'rectangle',
+  webcamSize: 'medium',
   qualityMode: 'balanced',
   defaultExport: 'ask',
   autoCleanupDays: null,
