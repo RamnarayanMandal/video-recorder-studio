@@ -85,6 +85,7 @@ export class CanvasComposer {
     this.pipSize = 'medium'
     this._running = false
     this._raf = 0
+    this._timer = 0
     this._capture = null
   }
 
@@ -117,17 +118,21 @@ export class CanvasComposer {
   start() {
     if (!this.ctx) return
     this._running = true
+    const frameMs = Math.max(8, Math.round(1000 / Math.max(1, this.frameRate || 30)))
     const tick = () => {
       if (!this._running) return
       this.drawFrame()
-      this._raf = requestAnimationFrame(tick)
+      // requestAnimationFrame can be heavily throttled when windows are occluded/minimized.
+      // Keep a timer-driven loop so capture remains stable during recording.
+      this._timer = setTimeout(tick, frameMs)
     }
-    this._raf = requestAnimationFrame(tick)
+    tick()
   }
 
   stop() {
     this._running = false
     cancelAnimationFrame(this._raf)
+    clearTimeout(this._timer)
   }
 
   getCanvas() {

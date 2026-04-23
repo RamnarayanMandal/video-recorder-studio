@@ -2,59 +2,52 @@
   "name": "video-recorder-studio",
   "version": "1.0.0",
   "main": "src/main/index.js",
-
   "scripts": {
     "dev": "concurrently \"npm run dev:renderer\" \"wait-on http://localhost:5173 && npm run dev:electron\"",
     "dev:renderer": "cd renderer && npm run dev",
     "dev:electron": "electron .",
-
     "build:renderer": "cd renderer && npm run build",
     "build": "npm run build:renderer",
-
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "release": "standard-version",
+    "release:major": "standard-version --release-as major",
+    "release:minor": "standard-version --release-as minor",
+    "release:patch": "standard-version --release-as patch"
   },
-
   "devDependencies": {
     "concurrently": "^8.2.2",
     "electron": "^30.5.1",
     "electron-builder": "^24.13.3",
+    "standard-version": "^9.5.0",
     "wait-on": "^7.2.0"
   },
-
   "dependencies": {
     "check-disk-space": "^3.4.0",
     "ffmpeg-static": "^5.3.0"
   },
-
   "build": {
     "appId": "com.internal.video-recorder-studio",
     "productName": "video-recorder-studio",
     "publish": null,
-
     "directories": {
       "output": "dist"
     },
-
     "files": [
       "src/main/**/*",
       "renderer/dist/**/*",
       "node_modules/ffmpeg-static/**/*",
       "package.json"
     ],
-
     "asarUnpack": [
       "**/node_modules/ffmpeg-static/**"
     ],
-
     "win": {
       "target": "nsis"
     },
-
     "mac": {
       "target": "dmg",
       "category": "public.app-category.utilities"
     },
-
     "linux": {
       "target": "AppImage"
     }

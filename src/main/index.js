@@ -174,11 +174,8 @@ ipcMain.handle('get-display-sources', async () => {
 
 ipcMain.handle('overlay-open', async () => {
   createOverlayWindow()
-  const selectedSourceId = String(overlayConfig.screenSourceId || '')
-  const isWholeScreenCapture = selectedSourceId.startsWith('screen:')
-  if (isWholeScreenCapture && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
-    mainWindow.minimize()
-  }
+  // Keep main window visible to avoid compositor throttling/freezing while recording.
+  // Minimizing can pause renderer-driven canvas updates on some systems.
   return { ok: true }
 })
 
