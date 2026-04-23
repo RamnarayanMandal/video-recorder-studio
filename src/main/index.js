@@ -2,6 +2,7 @@ const {
   app, BrowserWindow, ipcMain, desktopCapturer,
   systemPreferences, session, dialog, shell,
 } = require('electron')
+const { autoUpdater } = require('electron-updater')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -49,6 +50,8 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 
 let mainWindow = null
 let overlayWindow = null
+let isUpdateDownloadInProgress = false
+let hasShownUpdaterError = false
 let overlayConfig = {
   active: false,
   screenSourceId: '',
@@ -151,6 +154,111 @@ function createOverlayWindow() {
     overlayWindow = null
   })
   return overlayWindow
+}
+
+function setupAutoUpdater() {
+  if (!app.isPackaged) {
+    console.info('[Updater] Skipping update checks in development mode.')
+    return
+  }
+
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.allowDowngrade = false
+  autoUpdater.allowPrerelease = false
+
+  autoUpdater.on('checking-for-update', () => {
+    console.info('[Updater] Checking for updates...')
+  })
+
+  autoUpdater.on('update-available', async (info) => {
+    if (isUpdateDownloadInProgress) return
+    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+    const { response } = await dialog.showMessageBox(target, {
+      type: 'info',
+      buttons: ['Download update', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Update available',
+      message: `Version ${info.version} is available.`,
+      detail: 'The update will download in the background. You can keep using the app.',
+    })
+    if (response !== 0) return
+    isUpdateDownloadInProgress = true
+    try {
+      await autoUpdater.downloadUpdate()
+    } catch (err) {
+      isUpdateDownloadInProgress = false
+      console.error('[Updater] Download failed:', err?.message || err)
+      await dialog.showMessageBox(target, {
+        type: 'error',
+        title: 'Update download failed',
+        message: 'Could not download the update.',
+        detail: err?.message || 'Please try again later.',
+      })
+    }
+  })
+
+  autoUpdater.on('update-not-available', () => {
+    console.info('[Updater] No updates available.')
+  })
+
+  autoUpdater.on('download-progress', (progress) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setProgressBar(Math.max(0, Math.min(1, progress.percent / 100)))
+    }
+  })
+
+  autoUpdater.on('update-downloaded', async (info) => {
+    isUpdateDownloadInProgress = false
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setProgressBar(-1)
+    }
+    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+    const { response } = await dialog.showMessageBox(target, {
+      type: 'info',
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Update ready',
+      message: `Version ${info.version} has been downloaded.`,
+      detail: 'Restart the app to apply the update.',
+    })
+    if (response === 0) {
+      setImmediate(() => autoUpdater.quitAndInstall(false, true))
+    }
+  })
+
+  autoUpdater.on('error', async (err) => {
+    isUpdateDownloadInProgress = false
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setProgressBar(-1)
+    }
+    console.error('[Updater] Error:', err?.message || err)
+    if (hasShownUpdaterError) return
+    hasShownUpdaterError = true
+    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+    await dialog.showMessageBox(target, {
+      type: 'warning',
+      title: 'Updater issue',
+      message: 'Automatic update could not complete.',
+      detail: err?.message || 'You can continue using the app and try again later.',
+    })
+  })
+
+  // Initial background check shortly after startup.
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((err) => {
+      console.error('[Updater] checkForUpdates failed:', err?.message || err)
+    })
+  }, 3000)
+
+  // Re-check every 6 hours while app stays open.
+  setInterval(() => {
+    autoUpdater.checkForUpdates().catch((err) => {
+      console.error('[Updater] periodic check failed:', err?.message || err)
+    })
+  }, 6 * 60 * 60 * 1000)
 }
 
 ipcMain.handle('get-primary-screen', async () => {
@@ -669,6 +777,7 @@ ipcMain.handle('list-recordings', async (event, folder) => {
 app.whenReady().then(async () => {
   await requestMacPermissions()
   createWindow()
+  setupAutoUpdater()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
