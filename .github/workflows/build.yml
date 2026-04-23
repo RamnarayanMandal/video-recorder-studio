@@ -1,16 +1,26 @@
-name: Build and Release App
+name: Build & Release (All Platforms)
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*.*.*"
 
 permissions:
   contents: write
 
 jobs:
   build:
-    runs-on: windows-latest   # ✅ stable (multi-OS baad me karenge)
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+          - os: macos-latest
+            platform: mac
+          - os: ubuntu-latest
+            platform: linux
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
@@ -26,17 +36,38 @@ jobs:
           npm install
           cd renderer && npm install
 
-      - name: Build app (Electron)
+      # 🔥 Build WITHOUT publishing (important)
+      - name: Build app
         run: npm run dist
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # ✅ FIXED (important)
 
-      - name: Upload Release Files
+      # 📦 Upload artifacts (per OS)
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.platform }}
+          path: dist/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: List files
+        run: ls -R dist
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            dist/*.exe
-            dist/*.yml
+            dist/**/*.exe
+            dist/**/*.dmg
+            dist/**/*.AppImage
+            dist/**/*.yml
           generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # ✅ FIXED
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
