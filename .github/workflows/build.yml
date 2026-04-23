@@ -10,16 +10,14 @@ permissions:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: windows-latest   # ✅ stable (multi-OS baad me karenge)
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
 
@@ -30,15 +28,15 @@ jobs:
 
       - name: Build app (Electron)
         run: npm run dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # ✅ FIXED (important)
 
       - name: Upload Release Files
         uses: softprops/action-gh-release@v1
         with:
           files: |
             dist/*.exe
-            dist/*.dmg
-            dist/*.AppImage
+            dist/*.yml
           generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # ✅ FIXED
