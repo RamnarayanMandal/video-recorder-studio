@@ -7,10 +7,33 @@ const checkDiskSpace = typeof _cds === 'function' ? _cds : _cds.default
 const VIDEO_EXT = /\.(webm|mp4|mkv)$/i
 const META_NAME = '.media-recorder-meta.json'
 
+// ✅ FIX: ffmpeg-static asar ke andar band ho jaata hai Windows pe
+// isliye app.asar ko app.asar.unpacked se replace karna zaroori hai
 function ffExecutable(ffmpegPath) {
   if (!ffmpegPath) return null
   const p = String(ffmpegPath)
-  return p.includes('app.asar') ? p.replace('app.asar', 'app.asar.unpacked') : p
+
+  // asar.unpacked path banao
+  const unpacked = p.includes('app.asar')
+    ? p.replace('app.asar', 'app.asar.unpacked')
+    : p
+
+  // Windows pe .exe extension bhi check karo
+  const candidates = [
+    unpacked,
+    unpacked + '.exe',
+    p,
+    p + '.exe',
+  ]
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate
+    } catch { /* ignore */ }
+  }
+
+  // Koi bhi exist nahi karta toh unpacked path return karo (error aage handle hoga)
+  return unpacked
 }
 
 async function getDriveStats(folderPath) {
