@@ -4,7 +4,7 @@ A modern, high-performance desktop screen recorder built with Electron and React
 
 ---
 
-## 🚀 What's New (v2.1.0)
+## 🚀 What's New (v2.3.5)
 
 ✨ Major UI & Stability Update
 
@@ -38,7 +38,7 @@ A modern, high-performance desktop screen recorder built with Electron and React
 
 ## ⬇️ Download
 
-👉 **Download latest version (v1.0.6):**
+👉 **Download latest version (v2.3.5):**
 https://video-recorder-studio.vercel.app/
 
 
