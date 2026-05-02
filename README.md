@@ -4,7 +4,7 @@ A modern, high-performance desktop screen recorder built with Electron and React
 
 ---
 
-## 🚀 What's New (v2.3.5)
+## 🚀 What's New (v2.3.6)
 
 ✨ Major UI & Stability Update
 
