@@ -6,6 +6,18 @@ function containRect(vw, vh, cw, ch) {
   return { x: (cw - w) / 2, y: (ch - h) / 2, w, h }
 }
 
+function coverRect(vw, vh, cw, ch) {
+  if (!vw || !vh) return { x: 0, y: 0, w: cw, h: ch }
+  const scale = Math.max(cw / vw, ch / vh)
+  const w = vw * scale
+  const h = vh * scale
+  return { x: (cw - w) / 2, y: (ch - h) / 2, w, h }
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value))
+}
+
 function roundRectPath(ctx, x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h / 2)
   ctx.beginPath()
@@ -83,9 +95,13 @@ export class CanvasComposer {
     /** Optional drag override: pixel rect {x,y,w,h} in canvas space */
     this.pipOverride = null
     this.pipSize = 'medium'
+    this.outputAspect = '16:9'
+    this.screenFitMode = 'contain'
+    this.screenZoom = 1
+    this.defaultPipRect = null
     this._running = false
     this._raf = 0
-    this._timer = 0
+    this._lastFrameTs = 0
     this._capture = null
   }
 
@@ -115,24 +131,54 @@ export class CanvasComposer {
     this.pipSize = ['small', 'medium', 'large'].includes(size) ? size : 'medium'
   }
 
+  setOutputAspect(aspect) {
+    this.outputAspect = ['16:9', '9:16', '1:1', '4:5'].includes(aspect) ? aspect : '16:9'
+  }
+
+  setScreenFitMode(mode) {
+    this.screenFitMode = mode === 'blur' ? 'blur' : mode === 'crop' ? 'crop' : 'contain'
+  }
+
+  setScreenZoom(zoom = 1) {
+    this.screenZoom = clamp(Number(zoom) || 1, 1, 3)
+  }
+
+  resetPipRect() {
+    this.pipOverride = null
+  }
+
+  resizePipByScale(scaleDelta = 1) {
+    const base = this.getPipRect()
+    if (!base) return
+    const scale = Math.max(0.45, Math.min(2.4, scaleDelta))
+    const w = Math.round(base.w * scale)
+    const h = Math.round(base.h * scale)
+    const cx = base.x + base.w / 2
+    const cy = base.y + base.h / 2
+    const x = Math.max(8, Math.min(this.width - w - 8, Math.round(cx - w / 2)))
+    const y = Math.max(8, Math.min(this.height - h - 8, Math.round(cy - h / 2)))
+    this.pipOverride = { x, y, w, h }
+  }
+
   start() {
     if (!this.ctx) return
     this._running = true
     const frameMs = Math.max(8, Math.round(1000 / Math.max(1, this.frameRate || 30)))
-    const tick = () => {
+    const tick = (ts) => {
       if (!this._running) return
-      this.drawFrame()
-      // requestAnimationFrame can be heavily throttled when windows are occluded/minimized.
-      // Keep a timer-driven loop so capture remains stable during recording.
-      this._timer = setTimeout(tick, frameMs)
+      if (!this._lastFrameTs || ts - this._lastFrameTs >= frameMs) {
+        this._lastFrameTs = ts
+        this.drawFrame()
+      }
+      this._raf = requestAnimationFrame(tick)
     }
-    tick()
+    this._raf = requestAnimationFrame(tick)
   }
 
   stop() {
     this._running = false
     cancelAnimationFrame(this._raf)
-    clearTimeout(this._timer)
+    this._lastFrameTs = 0
   }
 
   getCanvas() {
@@ -172,8 +218,39 @@ export class CanvasComposer {
     if (sv && sv.readyState >= 2) {
       const vw = sv.videoWidth
       const vh = sv.videoHeight
-      const r = containRect(vw, vh, cw, ch)
-      ctx.drawImage(sv, r.x, r.y, r.w, r.h)
+      const zoom = clamp(this.screenZoom || 1, 1, 3)
+      const cropW = vw / zoom
+      const cropH = vh / zoom
+      const sx = (vw - cropW) / 2
+      const sy = (vh - cropH) / 2
+
+      // Crop to output aspect (for true short-mode framing).
+      const outputAspect = cw / ch
+      const cropAspect = cropW / cropH
+      let aspectCropW = cropW
+      let aspectCropH = cropH
+      if (cropAspect > outputAspect) {
+        aspectCropW = cropH * outputAspect
+      } else {
+        aspectCropH = cropW / outputAspect
+      }
+      const aspectSx = (vw - aspectCropW) / 2
+      const aspectSy = (vh - aspectCropH) / 2
+
+      const cover = coverRect(vw, vh, cw, ch)
+      if (this.screenFitMode === 'blur') {
+        ctx.save()
+        ctx.filter = 'blur(28px) brightness(.65)'
+        ctx.drawImage(sv, cover.x, cover.y, cover.w, cover.h)
+        ctx.restore()
+        const focusedContain = containRect(cropW, cropH, cw, ch)
+        ctx.drawImage(sv, sx, sy, cropW, cropH, focusedContain.x, focusedContain.y, focusedContain.w, focusedContain.h)
+      } else if (this.screenFitMode === 'crop') {
+        ctx.drawImage(sv, aspectSx, aspectSy, aspectCropW, aspectCropH, 0, 0, cw, ch)
+      } else {
+        const focusedContain = containRect(cropW, cropH, cw, ch)
+        ctx.drawImage(sv, sx, sy, cropW, cropH, focusedContain.x, focusedContain.y, focusedContain.w, focusedContain.h)
+      }
     }
 
     if (!this.webcamEnabled) return
@@ -182,6 +259,7 @@ export class CanvasComposer {
     if (!cv || cv.readyState < 2) return
 
     const pip = this.getPipRect()
+    if (!this.defaultPipRect) this.defaultPipRect = { ...pip }
     const { x, y, w, h } = pip
 
     ctx.save()
@@ -194,7 +272,7 @@ export class CanvasComposer {
       ctx.clip()
       ctx.drawImage(cv, x, y, w, h)
     } else {
-      roundRectPath(ctx, x, y, w, h, 6)
+      roundRectPath(ctx, x, y, w, h, 14)
       ctx.clip()
       ctx.drawImage(cv, x, y, w, h)
     }
@@ -210,7 +288,7 @@ export class CanvasComposer {
       ctx.arc(cx, cy, r, 0, Math.PI * 2)
       ctx.stroke()
     } else {
-      roundRectPath(ctx, x, y, w, h, 6)
+      roundRectPath(ctx, x, y, w, h, 14)
       ctx.stroke()
     }
   }

@@ -50,6 +50,9 @@ function loadInitialSettings() {
   const fr = loadString(STORAGE_KEYS.frameRate)
   const de = loadString(STORAGE_KEYS.defaultExport)
   const ac = loadString(STORAGE_KEYS.autoCleanupDays)
+  const shortAspect = loadString(STORAGE_KEYS.shortAspectRatio)
+  const shortBgMode = loadString(STORAGE_KEYS.shortBackgroundMode)
+  const shortZoomRaw = Number(loadString(STORAGE_KEYS.shortZoom, '1'))
   return {
     quality: loadString(STORAGE_KEYS.quality) || DEFAULT_SETTINGS.quality,
     frameRate: fr === '60' ? 60 : 30,
@@ -74,6 +77,14 @@ function loadInitialSettings() {
     micId: loadString(STORAGE_KEYS.micId),
     cameraId: loadString(STORAGE_KEYS.cameraId),
     screenSourceId: loadString(STORAGE_KEYS.screenSourceId),
+    shortVideoMode: loadBool(STORAGE_KEYS.shortVideoMode, DEFAULT_SETTINGS.shortVideoMode),
+    shortAspectRatio: ['9:16', '1:1', '4:5'].includes(shortAspect)
+      ? shortAspect
+      : DEFAULT_SETTINGS.shortAspectRatio,
+    shortBackgroundMode: ['blur', 'crop'].includes(shortBgMode)
+      ? shortBgMode
+      : DEFAULT_SETTINGS.shortBackgroundMode,
+    shortZoom: Number.isFinite(shortZoomRaw) ? Math.max(1, Math.min(3, shortZoomRaw)) : 1,
   }
 }
 
@@ -136,6 +147,9 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
     getPipRect,
     applyPipPreset,
     setMicMuted,
+    resetPipSize,
+    scalePip,
+    setWebcamEnabled,
   } = recorder
 
   const mp4Job = useConversionJobsStore((s) => {
@@ -176,6 +190,18 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
       if (partial.autoCleanupDays !== undefined) {
         if (next.autoCleanupDays == null) saveString(STORAGE_KEYS.autoCleanupDays, '')
         else saveString(STORAGE_KEYS.autoCleanupDays, String(next.autoCleanupDays))
+      }
+      if (partial.shortVideoMode !== undefined) {
+        saveBool(STORAGE_KEYS.shortVideoMode, next.shortVideoMode)
+      }
+      if (partial.shortAspectRatio !== undefined) {
+        saveString(STORAGE_KEYS.shortAspectRatio, next.shortAspectRatio)
+      }
+      if (partial.shortBackgroundMode !== undefined) {
+        saveString(STORAGE_KEYS.shortBackgroundMode, next.shortBackgroundMode)
+      }
+      if (partial.shortZoom !== undefined) {
+        saveString(STORAGE_KEYS.shortZoom, String(next.shortZoom))
       }
       return next
     })
@@ -277,10 +303,59 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
         const nextMic = !settings.mic
         patchSettings({ mic: nextMic })
         setMicMuted(!nextMic)
+        return
+      }
+      if (event.type === 'toggle-webcam' || event.type === 'shortcut-toggle-webcam') {
+        const nextWebcam = !settings.webcam
+        patchSettings({ webcam: nextWebcam })
+        setWebcamEnabled(nextWebcam)
+        return
+      }
+      if (event.type === 'flip-camera') {
+        flipCamera()
+        return
+      }
+      if (event.type === 'start-recording') {
+        if (state === STATES.IDLE) startRecording()
+        return
+      }
+      if (event.type === 'shortcut-toggle-record') {
+        if (state === STATES.IDLE) startRecording()
+        else if (state === STATES.RECORDING || state === STATES.PAUSED) stopRecording()
       }
     })
     return () => unsub?.()
-  }, [state, settings.mic, patchSettings, setMicMuted, stopRecording, togglePause])
+  }, [
+    state,
+    settings.mic,
+    settings.webcam,
+    patchSettings,
+    setMicMuted,
+    setWebcamEnabled,
+    stopRecording,
+    togglePause,
+    startRecording,
+    flipCamera,
+  ])
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (!e.ctrlKey) return
+      const k = String(e.key || '').toLowerCase()
+      if (k === 'r') {
+        e.preventDefault()
+        if (state === STATES.IDLE) startRecording()
+        else if (state === STATES.RECORDING || state === STATES.PAUSED) stopRecording()
+      } else if (k === 'w') {
+        e.preventDefault()
+        const nextWebcam = !settings.webcam
+        patchSettings({ webcam: nextWebcam })
+        setWebcamEnabled(nextWebcam)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [state, settings.webcam, patchSettings, setWebcamEnabled, startRecording, stopRecording])
 
   const pipHitTest = useCallback(
     (clientX, clientY) => {
@@ -339,7 +414,32 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
       if (!wrap) return
       updatePipDrag(e.clientX, e.clientY, wrap.getBoundingClientRect())
     }
-    const onUp = () => setPipDragging(false)
+    const onUp = () => {
+      const pip = getPipRect()
+      if (pip && canvasMountRef.current) {
+        const c = canvasMountRef.current.querySelector('canvas')
+        if (c) {
+          const corners = [
+            { id: 'top-left', x: 0, y: 0 },
+            { id: 'top-right', x: c.width, y: 0 },
+            { id: 'bottom-left', x: 0, y: c.height },
+            { id: 'bottom-right', x: c.width, y: c.height },
+          ]
+          const pcx = pip.x + pip.w / 2
+          const pcy = pip.y + pip.h / 2
+          let best = null
+          for (const corner of corners) {
+            const d = Math.hypot(pcx - corner.x, pcy - corner.y)
+            if (!best || d < best.d) best = { ...corner, d }
+          }
+          if (best && best.d < Math.min(c.width, c.height) * 0.38) {
+            applyPipPreset(best.id)
+            patchSettings({ pipPosition: best.id })
+          }
+        }
+      }
+      setPipDragging(false)
+    }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp, { once: true })
     return () => {
@@ -347,6 +447,14 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
       window.removeEventListener('pointerup', onUp)
     }
   }, [pipDragging, updatePipDrag])
+
+  function flipCamera() {
+    if (!videoInputs.length) return
+    const current = settings.cameraId || ''
+    const idx = videoInputs.findIndex((d) => d.deviceId === current)
+    const next = videoInputs[(idx + 1 + videoInputs.length) % videoInputs.length]
+    if (next?.deviceId) patchSettings({ cameraId: next.deviceId })
+  }
 
   useEffect(() => {
     if (!toolbarDragging) return
@@ -597,6 +705,50 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
               WebM is saved first; MP4 runs in the background (up to two at a time) without blocking the UI.
             </p>
 
+            <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text2)', letterSpacing: 0.6 }}>
+              SHORT VIDEO MODE
+            </div>
+            <ToggleRow
+              disabled={busy}
+              label="Enable short mode"
+              checked={settings.shortVideoMode}
+              onChange={(v) => patchSettings({ shortVideoMode: v })}
+            />
+            <label style={{ fontSize: 11, color: 'var(--text3)' }}>Aspect ratio</label>
+            <select
+              disabled={busy || !settings.shortVideoMode}
+              value={settings.shortAspectRatio}
+              onChange={(e) => patchSettings({ shortAspectRatio: e.target.value })}
+              style={selectStyle}
+            >
+              <option value="9:16">9:16 (default)</option>
+              <option value="1:1">1:1</option>
+              <option value="4:5">4:5</option>
+            </select>
+            <label style={{ fontSize: 11, color: 'var(--text3)' }}>Non-vertical screen handling</label>
+            <select
+              disabled={busy || !settings.shortVideoMode}
+              value={settings.shortBackgroundMode}
+              onChange={(e) => patchSettings({ shortBackgroundMode: e.target.value })}
+              style={selectStyle}
+            >
+              <option value="blur">Blur background fill</option>
+              <option value="crop">Center crop fill</option>
+            </select>
+            <label style={{ fontSize: 11, color: 'var(--text3)' }}>
+              Frame zoom ({settings.shortZoom.toFixed(2)}x)
+            </label>
+            <input
+              type="range"
+              min={1}
+              max={3}
+              step={0.01}
+              disabled={busy || !settings.shortVideoMode}
+              value={settings.shortZoom}
+              onChange={(e) => patchSettings({ shortZoom: Number(e.target.value) })}
+            />
+
             <label style={{ fontSize: 11, color: 'var(--text3)' }}>PiP position</label>
             <select
               disabled={busy}
@@ -681,6 +833,13 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
         <div
           ref={previewWrapRef}
           onPointerDown={onPipPointerDown}
+          onDoubleClick={() => resetPipSize()}
+          onWheel={(e) => {
+            if (!settings.webcam) return
+            e.preventDefault()
+            const direction = e.deltaY < 0 ? 1.06 : 0.94
+            scalePip(direction)
+          }}
           style={{
             flex: 1,
             background: '#000',
@@ -703,6 +862,31 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
               justifyContent: 'center',
             }}
           />
+          {settings.webcam && (isLive || isCountdown || (isIdle && previewActive)) && getPipRect() && (
+            (() => {
+              const pip = getPipRect()
+              const canvas = canvasMountRef.current?.querySelector('canvas')
+              if (!pip || !canvas) return null
+              return (
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 18,
+                    top: 18,
+                    zIndex: 6,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    pointerEvents: 'auto',
+                  }}
+                >
+                  <button type="button" style={iconBtn} onClick={() => scalePip(1.08)} title="Zoom in webcam">＋</button>
+                  <button type="button" style={iconBtn} onClick={() => scalePip(0.92)} title="Zoom out webcam">－</button>
+                  <button type="button" style={iconBtn} onDoubleClick={resetPipSize} onClick={resetPipSize} title="Reset webcam size">↺</button>
+                </div>
+              )
+            })()
+          )}
 
           {isIdle && (
             <div
@@ -1236,6 +1420,41 @@ export function RecorderPage({ saveFolder, onBack, onSaved }) {
               </svg>
               <MicBars level={micLevel} />
             </div>
+          )}
+          {(isLive || state === STATES.PAUSED || isIdle) && (
+            <>
+              <button
+                type="button"
+                onClick={() => patchSettings({ shortZoom: Math.min(3, Number((settings.shortZoom + 0.05).toFixed(2))) })}
+                title="Zoom in frame"
+                style={roundIconBtn}
+              >
+                ＋
+              </button>
+              <button
+                type="button"
+                onClick={() => patchSettings({ shortZoom: Math.max(1, Number((settings.shortZoom - 0.05).toFixed(2))) })}
+                title="Zoom out frame"
+                style={roundIconBtn}
+              >
+                －
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const nextWebcam = !settings.webcam
+                  patchSettings({ webcam: nextWebcam })
+                  setWebcamEnabled(nextWebcam)
+                }}
+                title="Toggle webcam (Ctrl+W)"
+                style={roundIconBtn}
+              >
+                {settings.webcam ? '📷' : '🚫'}
+              </button>
+              <button type="button" onClick={flipCamera} title="Flip camera" style={roundIconBtn}>
+                ⇄
+              </button>
+            </>
           )}
 
           {isLive && (

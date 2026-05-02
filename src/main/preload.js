@@ -57,6 +57,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   overlayStopRecording: () => ipcRenderer.invoke('overlay-stop-recording'),
   overlayToggleMic: () => ipcRenderer.invoke('overlay-toggle-mic'),
   overlayTogglePause: () => ipcRenderer.invoke('overlay-toggle-pause'),
+  overlayToggleWebcam: () => ipcRenderer.invoke('overlay-toggle-webcam'),
+  overlayFlipCamera: () => ipcRenderer.invoke('overlay-flip-camera'),
+  overlayStartRecording: () => ipcRenderer.invoke('overlay-start-recording'),
   onOverlayConfig: (callback) => {
     const handler = (_event, data) => callback(data)
     ipcRenderer.on('overlay-config', handler)

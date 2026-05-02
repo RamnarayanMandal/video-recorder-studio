@@ -7,7 +7,7 @@ const DEFAULT_CONFIG = {
   screenSourceId: '',
   cameraId: '',
   webcam: true,
-  webcamShape: 'rectangle',
+  webcamShape: 'circle',
   webcamSize: 'medium',
   durationSec: 0,
   micLevel: 0,
@@ -270,6 +270,16 @@ export function OverlayApp() {
         <span style={{ color: '#fff', fontSize: 12, minWidth: 72, fontVariantNumeric: 'tabular-nums' }}>
           {fmtHMS(elapsedSec)}
         </span>
+        {!config.active && (
+          <button
+            type="button"
+            onClick={() => window.electronAPI.overlayStartRecording()}
+            style={{ ...controlBtn, width: 56 }}
+            title="Start recording"
+          >
+            Rec
+          </button>
+        )}
         <button
           type="button"
           onClick={() => window.electronAPI.overlayToggleMic()}
@@ -285,6 +295,22 @@ export function OverlayApp() {
           title={config.isPaused ? 'Resume' : 'Pause'}
         >
           {config.isPaused ? '▶' : '⏸'}
+        </button>
+        <button
+          type="button"
+          onClick={() => window.electronAPI.overlayToggleWebcam()}
+          style={controlBtn}
+          title="Toggle webcam"
+        >
+          {config.webcam ? '📷' : '🚫'}
+        </button>
+        <button
+          type="button"
+          onClick={() => window.electronAPI.overlayFlipCamera()}
+          style={controlBtn}
+          title="Flip camera"
+        >
+          ⇄
         </button>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 22, width: 26 }}>
           {meterBars}

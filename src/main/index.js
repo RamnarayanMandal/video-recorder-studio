@@ -57,8 +57,13 @@ let overlayConfig = {
   screenSourceId: '',
   cameraId: '',
   webcam: true,
-  webcamShape: 'rectangle',
+  webcamShape: 'circle',
   webcamSize: 'medium',
+}
+
+function forwardOverlayAction(type) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('overlay-action', { type })
 }
 
 async function requestMacPermissions() {
@@ -94,6 +99,15 @@ function createWindow() {
   isDev
     ? win.loadURL('http://localhost:5173')
     : win.loadFile(path.join(__dirname, '../../renderer/dist/index.html'))
+  win.webContents.on('before-input-event', (_event, input) => {
+    if (input.type !== 'keyDown' || !input.control) return
+    const key = String(input.key || '').toLowerCase()
+    if (key === 'r') {
+      forwardOverlayAction('shortcut-toggle-record')
+    } else if (key === 'w') {
+      forwardOverlayAction('shortcut-toggle-webcam')
+    }
+  })
   mainWindow = win
   return win
 }
@@ -152,6 +166,15 @@ function createOverlayWindow() {
   })
   overlayWindow.on('closed', () => {
     overlayWindow = null
+  })
+  overlayWindow.webContents.on('before-input-event', (_event, input) => {
+    if (input.type !== 'keyDown' || !input.control) return
+    const key = String(input.key || '').toLowerCase()
+    if (key === 'r') {
+      forwardOverlayAction('shortcut-toggle-record')
+    } else if (key === 'w') {
+      forwardOverlayAction('shortcut-toggle-webcam')
+    }
   })
   return overlayWindow
 }
@@ -363,6 +386,21 @@ ipcMain.handle('overlay-toggle-pause', async () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('overlay-action', { type: 'toggle-pause' })
   }
+  return { ok: true }
+})
+
+ipcMain.handle('overlay-toggle-webcam', async () => {
+  forwardOverlayAction('toggle-webcam')
+  return { ok: true }
+})
+
+ipcMain.handle('overlay-flip-camera', async () => {
+  forwardOverlayAction('flip-camera')
+  return { ok: true }
+})
+
+ipcMain.handle('overlay-start-recording', async () => {
+  forwardOverlayAction('start-recording')
   return { ok: true }
 })
 

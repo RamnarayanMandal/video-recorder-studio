@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useEffect } from 'react'
 import { getDesktopMediaStream } from '../lib/desktopCapture.js'
 import { createMixedAudioOutput } from '../lib/audioMix.js'
 import { CanvasComposer } from '../lib/canvasComposer.js'
-import { resolutionDims } from '../lib/recordingSettings.js'
+import { resolutionDims, shortAspectDims } from '../lib/recordingSettings.js'
 
 export const STATES = {
   IDLE: 'idle',
@@ -238,7 +238,10 @@ export function useRecorder({
   }, [])
 
   const acquireStreams = useCallback(async () => {
-    const { width, height } = resolutionDims(settings.quality, settings.qualityMode || 'balanced')
+    const useShortMode = settings.shortVideoMode !== false
+    const { width, height } = useShortMode
+      ? shortAspectDims(settings.shortAspectRatio || '9:16', settings.quality)
+      : resolutionDims(settings.quality, settings.qualityMode || 'balanced')
     const frameRate = settings.frameRate
 
     if (!settings.screenSourceId) {
@@ -258,8 +261,8 @@ export function useRecorder({
     }
 
     const desktop = await getDesktopMediaStream(settings.screenSourceId, {
-      width,
-      height,
+      width: Math.max(width, 1920),
+      height: Math.max(height, 1080),
       frameRate,
       withSystemAudio: settings.systemAudio,
     })
@@ -347,6 +350,12 @@ export function useRecorder({
     composer.setPipShape(settings.webcamShape || 'rectangle')
     composer.setPipPreset(settings.pipPosition)
     composer.setPipSize(settings.webcamSize || 'medium')
+    composer.setScreenZoom(settings.shortZoom || 1)
+    composer.setScreenFitMode(
+      useShortMode
+        ? (settings.shortBackgroundMode === 'crop' ? 'crop' : 'blur')
+        : 'contain',
+    )
     composerRef.current = composer
     composer.start()
     mountCanvas(composer.getCanvas())
@@ -754,6 +763,10 @@ export function useRecorder({
     settings.micId,
     settings.systemAudio,
     settings.pipPosition,
+    settings.shortVideoMode,
+    settings.shortAspectRatio,
+    settings.shortBackgroundMode,
+    settings.shortZoom,
   ].join('|')
 
   useEffect(() => {
@@ -780,6 +793,22 @@ export function useRecorder({
   useEffect(() => {
     composerRef.current?.setPipSize?.(settings.webcamSize || 'medium')
   }, [settings.webcamSize])
+
+  useEffect(() => {
+    composerRef.current?.setWebcamEnabled?.(!!settings.webcam)
+  }, [settings.webcam])
+
+  useEffect(() => {
+    composerRef.current?.setScreenFitMode?.(
+      settings.shortVideoMode !== false
+        ? (settings.shortBackgroundMode === 'crop' ? 'crop' : 'blur')
+        : 'contain',
+    )
+  }, [settings.shortVideoMode, settings.shortBackgroundMode])
+
+  useEffect(() => {
+    composerRef.current?.setScreenZoom?.(settings.shortZoom || 1)
+  }, [settings.shortZoom])
 
   useEffect(() => {
     durationRef.current = duration
@@ -855,6 +884,18 @@ export function useRecorder({
     comp.setPipOverride(null)
   }, [])
 
+  const resetPipSize = useCallback(() => {
+    composerRef.current?.resetPipRect?.()
+  }, [])
+
+  const scalePip = useCallback((scaleDelta) => {
+    composerRef.current?.resizePipByScale?.(scaleDelta)
+  }, [])
+
+  const setWebcamEnabled = useCallback((enabled) => {
+    composerRef.current?.setWebcamEnabled?.(!!enabled)
+  }, [])
+
   const setMicMuted = useCallback((muted) => {
     const tracks = micStreamRef.current?.getAudioTracks?.() || []
     tracks.forEach((t) => {
@@ -895,6 +936,9 @@ export function useRecorder({
     updatePipDrag,
     getPipRect,
     applyPipPreset,
+    resetPipSize,
+    scalePip,
+    setWebcamEnabled,
     setMicMuted,
     isStarting,
   }
