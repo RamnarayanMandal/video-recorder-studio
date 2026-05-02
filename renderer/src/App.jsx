@@ -4,6 +4,7 @@ import { RecorderPage } from './pages/RecorderPage.jsx'
 import { BackgroundConversionBar } from './components/BackgroundConversionBar.jsx'
 import { useConversionJobsStore } from './stores/conversionJobsStore.js'
 import { STORAGE_KEYS, loadString, saveString } from './lib/recordingSettings.js'
+import appLogo from './assets/logo-icon.png'
 
 export default function App() {
   const [page, setPage] = useState('home')
@@ -72,10 +73,11 @@ export default function App() {
         WebkitAppRegion: 'drag',
         userSelect: 'none',
       }}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-          <rect x="2" y="5" width="15" height="14" rx="2.5" stroke="var(--purple)" strokeWidth="1.8"/>
-          <path d="M17 9l5-3v12l-5-3V9z" stroke="var(--purple)" strokeWidth="1.8" strokeLinejoin="round"/>
-        </svg>
+        <img
+          src={appLogo}
+          alt="Video Recorder Studio logo"
+          style={{ width: 20, height: 20, objectFit: 'cover', borderRadius: 4 }}
+        />
         <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: .2 }}>Video Recorder Studio</span>
 
         <div style={{ flex: 1 }} />

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { STORAGE_KEYS, loadString, saveString } from '../lib/recordingSettings.js'
+import { SupportDownloadSection } from '../components/SupportDownloadSection.jsx'
 
 function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} B`
@@ -389,6 +390,8 @@ export function HomePage({ saveFolder, onPickFolder, onStartRecorder }) {
         </div>
       )}
 
+      
+
       <div style={{ fontWeight: 600, fontSize: 15 }}>
         Library {loading ? '(loading…)' : `(${filteredSorted.length})`}
       </div>
@@ -535,6 +538,8 @@ export function HomePage({ saveFolder, onPickFolder, onStartRecorder }) {
           ))}
         </div>
       )}
+
+<SupportDownloadSection />
     </div>
   )
 }
